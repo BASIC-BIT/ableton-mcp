@@ -3,9 +3,10 @@ from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
 import logging
+import os
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union
+from typing import AsyncIterator, Dict, Any, List, Union, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -103,9 +104,13 @@ class AbletonConnection:
         # Check if this is a state-modifying command
         is_modifying_command = command_type in [
             "create_midi_track", "create_audio_track", "set_track_name",
-            "create_clip", "add_notes_to_clip", "set_clip_name",
+            "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
+            "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect"
+            "start_playback", "stop_playback", "load_instrument_or_effect",
+            "set_clip_warping", "set_clip_warp_mode", "add_warp_marker",
+            "move_warp_marker", "remove_warp_marker", "set_clip_markers",
+            "set_clip_gain"
         ]
         
         try:
@@ -255,6 +260,14 @@ def get_ableton_connection():
     return _ableton_connection
 
 
+def _normalize_audio_path(file_path: str) -> str:
+    """Return an absolute local audio file path that Ableton can import."""
+    normalized = os.path.abspath(os.path.expandvars(os.path.expanduser(file_path)))
+    if not os.path.isfile(normalized):
+        raise FileNotFoundError(f"Audio file not found: {normalized}")
+    return normalized
+
+
 # Core Tool endpoints
 
 @mcp.tool()
@@ -302,6 +315,23 @@ def create_midi_track(ctx: Context, index: int = -1) -> str:
 
 
 @mcp.tool()
+def create_audio_track(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new audio track in the Ableton session.
+
+    Parameters:
+    - index: The index to insert the track at (-1 = end of list)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_audio_track", {"index": index})
+        return f"Created new audio track: {result.get('name', 'unknown')}"
+    except Exception as e:
+        logger.error(f"Error creating audio track: {str(e)}")
+        return f"Error creating audio track: {str(e)}"
+
+
+@mcp.tool()
 def set_track_name(ctx: Context, track_index: int, name: str) -> str:
     """
     Set the name of a track.
@@ -339,6 +369,75 @@ def create_clip(ctx: Context, track_index: int, clip_index: int, length: float =
     except Exception as e:
         logger.error(f"Error creating clip: {str(e)}")
         return f"Error creating clip: {str(e)}"
+
+
+@mcp.tool()
+def create_audio_clip(ctx: Context, track_index: int, clip_index: int, file_path: str) -> str:
+    """
+    Create an audio clip from a local audio file in a Session View clip slot.
+
+    Parameters:
+    - track_index: The index of the audio track to create the clip in
+    - clip_index: The index of the clip slot to create the clip in
+    - file_path: Absolute or user-relative path to a supported local audio file
+    """
+    try:
+        audio_path = _normalize_audio_path(file_path)
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_audio_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "file_path": audio_path
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error creating audio clip: {str(e)}")
+        return f"Error creating audio clip: {str(e)}"
+
+
+@mcp.tool()
+def create_arrangement_audio_clip(ctx: Context, track_index: int, file_path: str, position: float = 0.0) -> str:
+    """
+    Create an audio clip from a local audio file in Arrangement View.
+
+    Parameters:
+    - track_index: The index of the audio track to create the clip in
+    - file_path: Absolute or user-relative path to a supported local audio file
+    - position: Arrangement position in beats where the clip should start
+    """
+    try:
+        audio_path = _normalize_audio_path(file_path)
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_arrangement_audio_clip", {
+            "track_index": track_index,
+            "file_path": audio_path,
+            "position": position
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error creating arrangement audio clip: {str(e)}")
+        return f"Error creating arrangement audio clip: {str(e)}"
+
+
+@mcp.tool()
+def get_clip_info(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get detailed information about a Session View clip, including audio warp settings.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_info", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip info: {str(e)}")
+        return f"Error getting clip info: {str(e)}"
 
 @mcp.tool()
 def add_notes_to_clip(
@@ -388,6 +487,214 @@ def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) ->
     except Exception as e:
         logger.error(f"Error setting clip name: {str(e)}")
         return f"Error setting clip name: {str(e)}"
+
+
+@mcp.tool()
+def set_clip_warping(ctx: Context, track_index: int, clip_index: int, warping: bool) -> str:
+    """
+    Enable or disable warping for an audio clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - warping: True to enable warping, False to disable it
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_warping", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "warping": warping
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting clip warping: {str(e)}")
+        return f"Error setting clip warping: {str(e)}"
+
+
+@mcp.tool()
+def set_clip_warp_mode(ctx: Context, track_index: int, clip_index: int, warp_mode: int) -> str:
+    """
+    Set the warp mode for an audio clip.
+
+    Warp mode indexes: 0=Beats, 1=Tones, 2=Texture, 3=Re-Pitch,
+    4=Complex, 5=REX, 6=Complex Pro.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - warp_mode: Ableton warp mode index
+    """
+    try:
+        if warp_mode < 0 or warp_mode > 6:
+            raise ValueError("warp_mode must be between 0 and 6")
+
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_warp_mode", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "warp_mode": warp_mode
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting clip warp mode: {str(e)}")
+        return f"Error setting clip warp mode: {str(e)}"
+
+
+@mcp.tool()
+def add_warp_marker(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    beat_time: float,
+    sample_time: Optional[float] = None
+) -> str:
+    """
+    Add a warp marker to an audio clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - beat_time: Clip beat time for the warp marker
+    - sample_time: Optional source sample time for the marker, in seconds
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "beat_time": beat_time
+        }
+        if sample_time is not None:
+            params["sample_time"] = sample_time
+
+        result = ableton.send_command("add_warp_marker", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error adding warp marker: {str(e)}")
+        return f"Error adding warp marker: {str(e)}"
+
+
+@mcp.tool()
+def move_warp_marker(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    beat_time: float,
+    beat_time_distance: float
+) -> str:
+    """
+    Move an existing warp marker by a beat-time distance.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - beat_time: Existing marker beat time
+    - beat_time_distance: Beat distance to move the marker by
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("move_warp_marker", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "beat_time": beat_time,
+            "beat_time_distance": beat_time_distance
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error moving warp marker: {str(e)}")
+        return f"Error moving warp marker: {str(e)}"
+
+
+@mcp.tool()
+def remove_warp_marker(ctx: Context, track_index: int, clip_index: int, beat_time: float) -> str:
+    """
+    Remove an existing warp marker by beat time.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - beat_time: Existing marker beat time
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("remove_warp_marker", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "beat_time": beat_time
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error removing warp marker: {str(e)}")
+        return f"Error removing warp marker: {str(e)}"
+
+
+@mcp.tool()
+def set_clip_markers(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    start_marker: Optional[float] = None,
+    end_marker: Optional[float] = None,
+    loop_start: Optional[float] = None,
+    loop_end: Optional[float] = None,
+    looping: Optional[bool] = None
+) -> str:
+    """
+    Set clip start/end and loop markers.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - start_marker: Optional start marker value
+    - end_marker: Optional end marker value
+    - loop_start: Optional loop start value
+    - loop_end: Optional loop end value
+    - looping: Optional loop toggle
+    """
+    try:
+        params = {"track_index": track_index, "clip_index": clip_index}
+        optional_values = {
+            "start_marker": start_marker,
+            "end_marker": end_marker,
+            "loop_start": loop_start,
+            "loop_end": loop_end,
+            "looping": looping,
+        }
+        params.update({key: value for key, value in optional_values.items() if value is not None})
+
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_markers", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting clip markers: {str(e)}")
+        return f"Error setting clip markers: {str(e)}"
+
+
+@mcp.tool()
+def set_clip_gain(ctx: Context, track_index: int, clip_index: int, gain: float) -> str:
+    """
+    Set an audio clip's gain.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - gain: Clip gain normalized from 0.0 to 1.0
+    """
+    try:
+        if gain < 0.0 or gain > 1.0:
+            raise ValueError("gain must be between 0.0 and 1.0")
+
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_gain", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "gain": gain
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting clip gain: {str(e)}")
+        return f"Error setting clip gain: {str(e)}"
 
 @mcp.tool()
 def set_tempo(ctx: Context, tempo: float) -> str:

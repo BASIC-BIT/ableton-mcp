@@ -8,6 +8,11 @@ import threading
 import time
 import traceback
 
+try:
+    basestring
+except NameError:
+    basestring = str
+
 # Change queue import for Python 2
 try:
     import Queue as queue  # Python 2
@@ -219,17 +224,17 @@ class AbletonMCP(ControlSurface):
         }
         
         try:
-            # Route the command to the appropriate handler
-            if command_type == "get_session_info":
-                response["result"] = self._get_session_info()
-            elif command_type == "get_track_info":
-                track_index = params.get("track_index", 0)
-                response["result"] = self._get_track_info(track_index)
-            # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name", 
-                                 "create_clip", "add_notes_to_clip", "set_clip_name", 
+            # Route Live Object Model commands through Ableton's main thread.
+            if command_type in ["get_session_info", "get_track_info", "get_browser_item",
+                                 "get_browser_tree", "get_browser_items_at_path",
+                                 "create_midi_track", "create_audio_track", "set_track_name",
+                                 "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
+                                 "get_clip_info", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item"]:
+                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "set_clip_warping", "set_clip_warp_mode", "add_warp_marker",
+                                 "move_warp_marker", "remove_warp_marker", "set_clip_markers",
+                                 "set_clip_gain"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -237,9 +242,17 @@ class AbletonMCP(ControlSurface):
                 def main_thread_task():
                     try:
                         result = None
-                        if command_type == "create_midi_track":
+                        if command_type == "get_session_info":
+                            result = self._get_session_info()
+                        elif command_type == "get_track_info":
+                            track_index = params.get("track_index", 0)
+                            result = self._get_track_info(track_index)
+                        elif command_type == "create_midi_track":
                             index = params.get("index", -1)
                             result = self._create_midi_track(index)
+                        elif command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
                         elif command_type == "set_track_name":
                             track_index = params.get("track_index", 0)
                             name = params.get("name", "")
@@ -249,6 +262,20 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             length = params.get("length", 4.0)
                             result = self._create_clip(track_index, clip_index, length)
+                        elif command_type == "create_audio_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            file_path = params.get("file_path", "")
+                            result = self._create_audio_clip(track_index, clip_index, file_path)
+                        elif command_type == "create_arrangement_audio_clip":
+                            track_index = params.get("track_index", 0)
+                            file_path = params.get("file_path", "")
+                            position = params.get("position", 0.0)
+                            result = self._create_arrangement_audio_clip(track_index, file_path, position)
+                        elif command_type == "get_clip_info":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._get_clip_info(track_index, clip_index)
                         elif command_type == "add_notes_to_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -282,6 +309,52 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
+                        elif command_type == "get_browser_item":
+                            uri = params.get("uri", None)
+                            path = params.get("path", None)
+                            result = self._get_browser_item(uri, path)
+                        elif command_type == "get_browser_tree":
+                            category_type = params.get("category_type", "all")
+                            result = self.get_browser_tree(category_type)
+                        elif command_type == "get_browser_items_at_path":
+                            path = params.get("path", "")
+                            result = self.get_browser_items_at_path(path)
+                        elif command_type == "set_clip_warping":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            warping = params.get("warping", True)
+                            result = self._set_clip_warping(track_index, clip_index, warping)
+                        elif command_type == "set_clip_warp_mode":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            warp_mode = params.get("warp_mode", 0)
+                            result = self._set_clip_warp_mode(track_index, clip_index, warp_mode)
+                        elif command_type == "add_warp_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            beat_time = params.get("beat_time", 0.0)
+                            sample_time = params.get("sample_time", None)
+                            result = self._add_warp_marker(track_index, clip_index, beat_time, sample_time)
+                        elif command_type == "move_warp_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            beat_time = params.get("beat_time", 0.0)
+                            beat_time_distance = params.get("beat_time_distance", 0.0)
+                            result = self._move_warp_marker(track_index, clip_index, beat_time, beat_time_distance)
+                        elif command_type == "remove_warp_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            beat_time = params.get("beat_time", 0.0)
+                            result = self._remove_warp_marker(track_index, clip_index, beat_time)
+                        elif command_type == "set_clip_markers":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._set_clip_markers(track_index, clip_index, params)
+                        elif command_type == "set_clip_gain":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            gain = params.get("gain", 1.0)
+                            result = self._set_clip_gain(track_index, clip_index, gain)
                         
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -299,7 +372,7 @@ class AbletonMCP(ControlSurface):
                 
                 # Wait for the response with a timeout
                 try:
-                    task_response = response_queue.get(timeout=10.0)
+                    task_response = response_queue.get(timeout=20.0)
                     if task_response.get("status") == "error":
                         response["status"] = "error"
                         response["message"] = task_response.get("message", "Unknown error")
@@ -373,12 +446,7 @@ class AbletonMCP(ControlSurface):
                 clip_info = None
                 if slot.has_clip:
                     clip = slot.clip
-                    clip_info = {
-                        "name": clip.name,
-                        "length": clip.length,
-                        "is_playing": clip.is_playing,
-                        "is_recording": clip.is_recording
-                    }
+                    clip_info = self._clip_summary(clip)
                 
                 clip_slots.append({
                     "index": slot_index,
@@ -432,6 +500,23 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
             raise
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        try:
+            self._song.create_audio_track(index)
+
+            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
+            new_track = self._song.tracks[new_track_index]
+
+            result = {
+                "index": new_track_index,
+                "name": new_track.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
+            raise
     
     
     def _set_track_name(self, track_index, name):
@@ -479,6 +564,80 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error creating clip: " + str(e))
+            raise
+
+    def _create_audio_clip(self, track_index, clip_index, file_path):
+        """Create an audio clip in a Session View clip slot from a local file"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            if not track.has_audio_input:
+                raise TypeError("Track is not an audio track")
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+            if clip_slot.has_clip:
+                raise Exception("Clip slot already has a clip")
+
+            if not hasattr(clip_slot, "create_audio_clip"):
+                raise NotImplementedError("This Live version does not expose ClipSlot.create_audio_clip")
+
+            clip_slot.create_audio_clip(file_path)
+            self._song.view.selected_track = track
+            self._song.view.highlighted_clip_slot = clip_slot
+            if clip_slot.has_clip:
+                try:
+                    self._song.view.detail_clip = clip_slot.clip
+                except Exception:
+                    pass
+                return self._clip_info(track_index, clip_index, clip_slot.clip)
+
+            return {
+                "created": True,
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "file_path": file_path
+            }
+        except Exception as e:
+            self.log_message("Error creating audio clip: " + str(e))
+            raise
+
+    def _create_arrangement_audio_clip(self, track_index, file_path, position):
+        """Create an audio clip in Arrangement View from a local file"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            if not track.has_audio_input:
+                raise TypeError("Track is not an audio track")
+
+            if not hasattr(track, "create_audio_clip"):
+                raise NotImplementedError("This Live version does not expose Track.create_audio_clip")
+
+            track.create_audio_clip(file_path, float(position))
+            self._song.view.selected_track = track
+
+            result = {
+                "created": True,
+                "track_index": track_index,
+                "track_name": track.name,
+                "file_path": file_path,
+                "position": float(position)
+            }
+
+            if hasattr(track, "arrangement_clips"):
+                result["arrangement_clip_count"] = len(track.arrangement_clips)
+                if len(track.arrangement_clips) > 0:
+                    result["last_arrangement_clip"] = self._clip_summary(track.arrangement_clips[-1])
+
+            return result
+        except Exception as e:
+            self.log_message("Error creating arrangement audio clip: " + str(e))
             raise
     
     def _add_notes_to_clip(self, track_index, clip_index, notes):
@@ -546,6 +705,220 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error setting clip name: " + str(e))
+            raise
+
+    def _get_session_clip(self, track_index, clip_index):
+        """Return a track, clip slot, and clip from Session View."""
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+
+        track = self._song.tracks[track_index]
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("Clip index out of range")
+
+        clip_slot = track.clip_slots[clip_index]
+        if not clip_slot.has_clip:
+            raise Exception("No clip in slot")
+
+        return track, clip_slot, clip_slot.clip
+
+    def _json_safe(self, value):
+        """Convert Live API return values into JSON-serializable values."""
+        if value is None or isinstance(value, (bool, int, float, basestring)):
+            return value
+        if hasattr(value, "beat_time") and hasattr(value, "sample_time"):
+            return {
+                "beat_time": float(value.beat_time),
+                "sample_time": float(value.sample_time),
+            }
+        if isinstance(value, dict):
+            return dict((str(k), self._json_safe(v)) for k, v in value.items())
+        if isinstance(value, (list, tuple)):
+            return [self._json_safe(item) for item in value]
+        return str(value)
+
+    def _vector_to_list(self, value, max_items=128):
+        """Convert Live API vector-like objects with explicit bounds."""
+        if value is None:
+            return None
+
+        result = []
+        try:
+            count = min(len(value), max_items)
+            for index in range(count):
+                result.append(self._json_safe(value[index]))
+            return result
+        except Exception:
+            return str(value)
+
+    def _clip_get_raw(self, clip, property_name, default=None):
+        try:
+            return getattr(clip, property_name)
+        except Exception:
+            return default
+
+    def _clip_get(self, clip, property_name, default=None):
+        try:
+            return self._json_safe(getattr(clip, property_name))
+        except Exception:
+            return default
+
+    def _clip_summary(self, clip):
+        """Return compact clip information suitable for track listings."""
+        result = {
+            "name": self._clip_get(clip, "name"),
+            "length": self._clip_get(clip, "length"),
+            "is_playing": self._clip_get(clip, "is_playing"),
+            "is_recording": self._clip_get(clip, "is_recording"),
+            "is_audio_clip": self._clip_get(clip, "is_audio_clip"),
+            "is_midi_clip": self._clip_get(clip, "is_midi_clip"),
+        }
+
+        if result.get("is_audio_clip"):
+            result.update({
+                "file_path": self._clip_get(clip, "file_path"),
+                "warping": self._clip_get(clip, "warping"),
+                "warp_mode": self._clip_get(clip, "warp_mode"),
+                "gain_display_string": self._clip_get(clip, "gain_display_string"),
+            })
+
+        return result
+
+    def _clip_info(self, track_index, clip_index, clip):
+        """Return detailed clip information, including audio warp state."""
+        result = self._clip_summary(clip)
+        result.update({
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "is_arrangement_clip": self._clip_get(clip, "is_arrangement_clip"),
+            "start_marker": self._clip_get(clip, "start_marker"),
+            "end_marker": self._clip_get(clip, "end_marker"),
+            "loop_start": self._clip_get(clip, "loop_start"),
+            "loop_end": self._clip_get(clip, "loop_end"),
+            "looping": self._clip_get(clip, "looping"),
+            "muted": self._clip_get(clip, "muted"),
+            "playing_position": self._clip_get(clip, "playing_position"),
+        })
+
+        if result.get("is_audio_clip"):
+            result.update({
+                "available_warp_modes": self._vector_to_list(self._clip_get_raw(clip, "available_warp_modes")),
+                "warp_markers": self._vector_to_list(self._clip_get_raw(clip, "warp_markers")),
+                "sample_length": self._clip_get(clip, "sample_length"),
+                "sample_rate": self._clip_get(clip, "sample_rate"),
+                "gain": self._clip_get(clip, "gain"),
+                "pitch_coarse": self._clip_get(clip, "pitch_coarse"),
+                "pitch_fine": self._clip_get(clip, "pitch_fine"),
+            })
+
+        return result
+
+    def _get_clip_info(self, track_index, clip_index):
+        """Get detailed information about a Session View clip."""
+        try:
+            _, _, clip = self._get_session_clip(track_index, clip_index)
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error getting clip info: " + str(e))
+            raise
+
+    def _require_audio_clip(self, track_index, clip_index):
+        track, clip_slot, clip = self._get_session_clip(track_index, clip_index)
+        if not self._clip_get(clip, "is_audio_clip", False):
+            raise TypeError("Clip is not an audio clip")
+        return track, clip_slot, clip
+
+    def _set_clip_warping(self, track_index, clip_index, warping):
+        """Enable or disable warping for an audio clip."""
+        try:
+            _, _, clip = self._require_audio_clip(track_index, clip_index)
+            clip.warping = bool(warping)
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error setting clip warping: " + str(e))
+            raise
+
+    def _set_clip_warp_mode(self, track_index, clip_index, warp_mode):
+        """Set an audio clip's warp mode."""
+        try:
+            _, _, clip = self._require_audio_clip(track_index, clip_index)
+            clip.warp_mode = int(warp_mode)
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error setting clip warp mode: " + str(e))
+            raise
+
+    def _add_warp_marker(self, track_index, clip_index, beat_time, sample_time=None):
+        """Add a warp marker to an audio clip."""
+        try:
+            import Live
+
+            _, _, clip = self._require_audio_clip(track_index, clip_index)
+            if not self._clip_get(clip, "warping", False):
+                clip.warping = True
+
+            beat_time = float(beat_time)
+            if sample_time is not None:
+                sample_time = float(sample_time)
+            else:
+                sample_time = float(clip.beat_to_sample_time(beat_time)) / float(clip.sample_rate)
+
+            marker = Live.Clip.WarpMarker(beat_time=beat_time, sample_time=sample_time)
+            clip.add_warp_marker(marker)
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error adding warp marker: " + str(e))
+            raise
+
+    def _move_warp_marker(self, track_index, clip_index, beat_time, beat_time_distance):
+        """Move an existing warp marker by beat distance."""
+        try:
+            _, _, clip = self._require_audio_clip(track_index, clip_index)
+            clip.move_warp_marker(float(beat_time), float(beat_time_distance))
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error moving warp marker: " + str(e))
+            raise
+
+    def _remove_warp_marker(self, track_index, clip_index, beat_time):
+        """Remove an existing warp marker by beat time."""
+        try:
+            _, _, clip = self._require_audio_clip(track_index, clip_index)
+            clip.remove_warp_marker(float(beat_time))
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error removing warp marker: " + str(e))
+            raise
+
+    def _set_clip_markers(self, track_index, clip_index, params):
+        """Set clip start/end markers and loop settings."""
+        try:
+            _, _, clip = self._get_session_clip(track_index, clip_index)
+
+            if "start_marker" in params:
+                clip.start_marker = float(params.get("start_marker"))
+            if "end_marker" in params:
+                clip.end_marker = float(params.get("end_marker"))
+            if "loop_start" in params:
+                clip.loop_start = float(params.get("loop_start"))
+            if "loop_end" in params:
+                clip.loop_end = float(params.get("loop_end"))
+            if "looping" in params:
+                clip.looping = bool(params.get("looping"))
+
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error setting clip markers: " + str(e))
+            raise
+
+    def _set_clip_gain(self, track_index, clip_index, gain):
+        """Set an audio clip's gain."""
+        try:
+            _, _, clip = self._require_audio_clip(track_index, clip_index)
+            clip.gain = float(gain)
+            return self._clip_info(track_index, clip_index, clip)
+        except Exception as e:
+            self.log_message("Error setting clip gain: " + str(e))
             raise
     
     def _set_tempo(self, tempo):
