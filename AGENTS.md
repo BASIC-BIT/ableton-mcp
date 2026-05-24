@@ -29,6 +29,12 @@
 - For Remote Script behavior, prefer a full Ableton restart before testing code changes. Control-surface toggling may leave Python modules cached by folder name.
 - A direct socket probe returning a domain error, such as `No clip in slot`, can confirm a command is recognized; `Unknown command` means Ableton is still running an old script.
 
+## PR Readiness
+
+- Do not treat a shallow Ableton smoke test as enough evidence for a public PR when changing unfamiliar Live API behavior.
+- Before opening a PR for Ableton API changes, write down the tested Live version, exact manual validation steps, expected results, observed results, and known gaps.
+- If the operator is still learning the workflow, do not rely on their confidence alone. Provide reproducible validation steps and keep the branch in the fork until the behavior is understood well enough to review.
+
 ## Local Testing Notes
 
 - The installed Ableton Remote Script lives outside this repo. Back it up before replacing it for local testing.
