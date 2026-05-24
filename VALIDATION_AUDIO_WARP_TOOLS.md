@@ -13,6 +13,8 @@ This branch is not PR-ready based on a shallow smoke test alone. The notes below
 - Scratch audio metadata: PCM 16-bit WAV, 48000 Hz, stereo, 4.0 seconds, 768078 bytes.
 - DJ-prep excerpt file: `D:\bench\sandbox\violin_136bpm_candidate_01h59m00s_to_02h02m00s.wav`
 - DJ-prep excerpt metadata: PCM 16-bit WAV, 48000 Hz, stereo, 180.0 seconds, 34560078 bytes.
+- Full-length source file: `D:\bench\sandbox\A MILLI ｜ IRL STREAM [XXT9VeONXH8].mp3`
+- Full-length source metadata: MP3, 48000 Hz, stereo, 9859.104 seconds, 262674452 bytes.
 
 ## Live Object Model References
 
@@ -102,6 +104,30 @@ Restart validation cases:
 
 Final restart retest state: tempo `120.0`, signature `4/4`, track count `4`, return track count `2`.
 
+## Full-Length DJ-File Retest
+
+After the restart retest, a full-length 2h44m MP3 source was imported into the same scratch Ableton set on 2026-05-24.
+
+Full-length test setup:
+
+- Baseline before import: tempo `120.0`, signature `4/4`, track count `4`, return track count `2`.
+- Test track: created audio track index `4`, renamed to `MCP LONG TEST - A MILLI`.
+- Test file: `D:\bench\sandbox\A MILLI ｜ IRL STREAM [XXT9VeONXH8].mp3`.
+- File metadata from `ffprobe`: MP3, 48000 Hz, stereo, duration `9859.104000`, size `262674452`.
+- Follow-up reads used a direct socket probe that stops after receiving parseable JSON, matching the MCP server's persistent-socket protocol. This avoided dumping full clip JSON into the transcript.
+
+Full-length validation cases:
+
+| Case | Steps | Expected | Observed | Status |
+| --- | --- | --- | --- | --- |
+| Full MP3 import | `create_audio_clip(track_index=4, clip_index=0, file_path=full_mp3)` | Full-length MP3 imports without timing out and returns JSON-safe clip info. | Returned successfully within the tool call. Clip name `A MILLI ｜ IRL STREAM [XXT9VeONXH8]`, `length=19718.22995832293`, `warping=true`, `warp_mode=4`, `muted=true`, `sample_length=473237519`, `sample_rate=48000.0`, marker count `2`. | Pass with caution |
+| Full MP3 follow-up read | Direct socket `get_clip_info(track_index=4, clip_index=0)` summary | Follow-up read remains responsive after import. | Completed in `2.721s`, response size `846` bytes, marker count `2`, first/last markers at `{0.0, 0.0}` and hidden marker `{0.03125, 0.015625}`. | Pass |
+| Full MP3 warp mode mutation | Direct socket `set_clip_warp_mode(track_index=4, clip_index=0, warp_mode=6)` summary | Warp mode mutation remains responsive on full-length clip. | Completed in `2.595s`, response size `846` bytes, returned `warp_mode=6`, marker count still `2`. | Pass |
+| Full MP3 marker add | Direct socket `add_warp_marker(track_index=4, clip_index=0, beat_time=136.0)` summary | Marker add remains responsive on full-length clip. | Completed in `2.667s`, response size `892` bytes, marker count `3`, added marker `{beat_time: 136.0, sample_time: 68.0}` plus hidden marker `{beat_time: 136.03125, sample_time: 68.015625}`. | Pass |
+| Full MP3 marker remove | Direct socket `remove_warp_marker(track_index=4, clip_index=0, beat_time=136.0)` summary | Marker remove remains responsive on full-length clip. | Completed in `2.665s`, response size `846` bytes, marker count returned to `2`. | Pass |
+
+Final full-length retest state: tempo `120.0`, signature `4/4`, track count `5`, return track count `2`.
+
 ## Important Findings
 
 - The main-thread routing change is necessary for reads and writes. Before routing read commands through Ableton's main thread, session/clip reads could time out or fail with Live Object Model signature mismatches.
@@ -111,11 +137,13 @@ Final restart retest state: tempo `120.0`, signature `4/4`, track count `4`, ret
 - `Clip.warping` is not a pure isolated boolean toggle. In Live 12.4, toggling warping off and on during this test also changed loop state, end markers, and the warp-marker set. Any DJ-prep workflow should re-read the clip after toggling warping and then explicitly set desired markers/loop state.
 - The last warp marker returned by the API may be hidden from the Live UI. This is expected per the LOM docs and should not be treated as a stray visible marker.
 - Longer audio imports can return an immediate pre-analysis state. The 3-minute DJ-prep excerpt initially returned `length=360.0` and two markers, then a follow-up operation/read returned `length=193.05616596944722` and many auto-warp markers. Workflows should re-read long clips after import before making decisions from clip length or marker data.
+- Full-length files do not necessarily auto-populate many warp markers. The 2h44m MP3 stayed in a sparse two-marker state after import, follow-up read, and warp mode mutation. This means workflows cannot assume either dense auto-warp markers or sparse markers solely from file length.
+- The Remote Script socket is persistent. A raw validation client must stop reading once it has received parseable JSON; waiting for the socket to close incorrectly appears as a timeout.
 
 ## Known Gaps Before PR
 
 - This was tested only on Ableton Live 12 Suite 12.4. The project README says Live 10 or newer, but the new `get_clip_info` behavior relies on some audio clip properties that the official docs mark as Live 11+ for at least `warp_markers` reads and `arrangement_clips`.
-- Validation now includes a 3-minute WAV excerpt, but it still does not prove performance or correctness for full-length DJ files, very large files, MP3 import, or files with complex auto-warp analysis.
+- Validation now includes a 3-minute WAV excerpt and a 2h44m MP3. It still does not prove correctness for every full-length DJ file, very large files beyond this MP3, or files with different auto-warp behavior.
 - Arrangement clip import is validated only through the immediate return payload and `arrangement_clip_count`; there is no MCP tool yet to fetch detailed Arrangement clip info by index.
 - The MCP tool return values are strings. Error cases are human-readable but not structured enough for automated downstream validation.
 - The validation was manual and mutated the open Ableton set. There is no cleanup/delete-track tool in this branch, so scratch tracks remain in the test set unless removed manually in Ableton.
@@ -125,7 +153,6 @@ Final restart retest state: tempo `120.0`, signature `4/4`, track count `4`, ret
 
 Do not open the upstream PR until the following are done:
 
-1. Run at least one full-length DJ-file test, or explicitly scope the PR to shorter local audio files and document that full-length DJ files are not yet validated.
-2. Decide whether the branch should claim Live 10+ compatibility, degrade gracefully on older Live versions, or document a narrower Live version requirement for the new audio/warp tools.
-3. Decide whether upstream should receive `AGENTS.md` and this validation note, or whether those should stay fork-local while the code changes go upstream separately.
-4. Draft the PR body from observed evidence, not operator confidence.
+1. Decide whether the branch should claim Live 10+ compatibility, degrade gracefully on older Live versions, or document a narrower Live version requirement for the new audio/warp tools.
+2. Decide whether upstream should receive `AGENTS.md` and this validation note, or whether those should stay fork-local while the code changes go upstream separately.
+3. Draft the PR body from observed evidence, not operator confidence.
